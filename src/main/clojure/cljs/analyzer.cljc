@@ -800,6 +800,14 @@
        :suffix         suffix
        :macro-present? (not (nil? (get-expander (symbol (str prefix) (str suffix)) env)))})))
 
+(defn lib&sublib
+  "If a library name has the form foo$bar, return a vector of the library and
+   the sublibrary property."
+  [lib]
+  (if-let [xs (re-matches #"(.*)\$(.*)" (str lib))]
+    (drop 1 xs)
+    [lib nil]))
+
 (defn loaded-js-ns?
   "Check if a JavaScript namespace has been loaded. JavaScript vars are
   not currently checked."
@@ -830,12 +838,14 @@
 (defn node-module-dep?
   #?(:cljs {:tag boolean})
   [module]
-  #?(:clj (contains?
-            (get-in @env/*compiler* [:node-module-index])
-            (str module))
+  #?(:clj  (let [idx (get @env/*compiler* :node-module-index)]
+             (or (contains? idx (str module))
+                 (contains? idx (-> module lib&sublib first))))
      :cljs (try
              (and (= *target* "nodejs")
-                  (boolean (js/require.resolve (str module))))
+                  (boolean
+                    (or (js/require.resolve (str module))
+                        (js/require.resolve (-> module lib&sublib first)))))
              (catch :default _
                false))))
 
@@ -2624,20 +2634,22 @@
                        (node-module-dep? dep)
                        (js-module-exists? (name dep))
                        #?(:clj (deps/find-classpath-lib dep)))
-           (if (contains? (:js-dependency-index compiler) (name dep))
-             (let [dep-name (name dep)]
-               (when (string/starts-with? dep-name "goog.")
-                 #?(:clj (let [js-lib (get-in compiler [:js-dependency-index dep-name])
-                               ns (externs/analyze-goog-file (:file js-lib) (symbol dep-name))]
-                           (swap! env/*compiler* update-in [::namespaces dep] merge ns)))))
-             #?(:clj (if-some [src (locate-src dep)]
-                       (analyze-file src opts)
-                       (throw
-                         (error env
-                           (error-message :undeclared-ns {:ns-sym dep :js-provide (name dep)}))))
-                :cljs (throw
-                        (error env
-                          (error-message :undeclared-ns {:ns-sym dep :js-provide (name dep)})))))))))))
+           (let [idx (:js-dependency-index compiler)]
+             (if (or (contains? idx (name dep))
+                     (contains? idx (-> dep lib&sublib first)))
+               (let [dep-name (name dep)]
+                 (when (string/starts-with? dep-name "goog.")
+                   #?(:clj (let [js-lib (get idx dep-name)
+                                 ns (externs/analyze-goog-file (:file js-lib) (symbol dep-name))]
+                             (swap! env/*compiler* update-in [::namespaces dep] merge ns)))))
+               #?(:clj  (if-some [src (locate-src dep)]
+                          (analyze-file src opts)
+                          (throw
+                            (error env
+                              (error-message :undeclared-ns {:ns-sym dep :js-provide (name dep)}))))
+                  :cljs (throw
+                          (error env
+                            (error-message :undeclared-ns {:ns-sym dep :js-provide (name dep)}))))))))))))
 
 (defn missing-use? [lib sym cenv]
   (let [js-lib (get-in cenv [:js-dependency-index (name lib)])]

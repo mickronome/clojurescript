@@ -1251,18 +1251,25 @@
   [{:keys [target val env]}]
   (emit-wrap env (emits "(" target " = " val ")")))
 
+(defn sublib-select
+  [sublib]
+  (str "['" sublib "']"))
+
 (defn emit-global-export [ns-name global-exports lib]
-  (emitln (munge ns-name) "."
-          (ana/munge-global-export lib)
-          " = goog.global"
-          ;; Convert object dot access to bracket access
-          (->> (string/split (name (or (get global-exports (symbol lib))
-                                       (get global-exports (name lib))))
-                             #"\.")
-               (map (fn [prop]
-                      (str "[\"" prop "\"]")))
-               (apply str))
-          ";"))
+  (let [[lib sublib] (ana/lib&sublib lib)]
+    (emitln
+      (munge ns-name) "."
+      (ana/munge-global-export lib)
+      " = goog.global"
+      ;; Convert object dot access to bracket access
+      (->> (string/split (name (or (get global-exports (symbol lib))
+                                 (get global-exports (name lib))))
+             #"\.")
+        (map (fn [prop]
+               (str "[\"" prop "\"]")))
+        (apply str))
+      (sublib-select sublib)
+      ";")))
 
 (defn load-libs
   [libs seen reloads deps ns-name]
@@ -1317,9 +1324,10 @@
         (when-not (= lib 'goog)
           (emitln "goog.require('" (munge lib) "');"))))
     (doseq [lib node-libs]
-      (emitln (munge ns-name) "."
-        (ana/munge-node-lib lib)
-        " = require('" lib "');"))
+      (let [[lib sublib] (ana/lib&sublib lib)]
+        (emitln (munge ns-name) "."
+          (ana/munge-node-lib lib)
+          " = require('" lib "')" (sublib-select sublib) ";")))
     (doseq [lib global-exports-libs]
       (let [{:keys [global-exports]} (get js-dependency-index (name lib))]
         (emit-global-export ns-name global-exports lib)))
