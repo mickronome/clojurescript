@@ -1253,7 +1253,8 @@
 
 (defn sublib-select
   [sublib]
-  (str "['" sublib "']"))
+  (when sublib
+    (str "['" sublib "']")))
 
 (defn emit-global-export [ns-name global-exports lib]
   (let [[lib sublib] (ana/lib&sublib lib)]
